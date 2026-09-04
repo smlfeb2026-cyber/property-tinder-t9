@@ -1,0 +1,7 @@
+{
+  "name": "Electric Property Tinder - SG Homeowner Matchmaker",
+  "description": "Singapore Property Tinder and AI Electric Agent matchmaking platform for homeowners, monitoring URA & HDB market prices, projecting profit margins, and matching BTO/EC opportunities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

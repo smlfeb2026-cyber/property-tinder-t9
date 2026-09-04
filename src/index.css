@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-serif: 'Cormorant Garamond', Georgia, serif;
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+  body {
+    font-family: var(--font-sans);
+    background-color: #0A0A0A;
+    color: #E0E0E0;
+  }
+  .font-serif {
+    font-family: var(--font-serif);
+  }
+}
