@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   LineChart as LineChartIcon,
   Table as TableIcon,
@@ -15,9 +15,15 @@ import {
   BellRing,
   Info,
   SlidersHorizontal,
+  Code2,
+  RefreshCw,
+  Database,
+  ExternalLink,
 } from 'lucide-react';
-import { TransactionRecord, PriceTrendPoint, CustomerProfile } from '../types';
+import { TransactionRecord, PriceTrendPoint, CustomerProfile, DataGovSgRecord } from '../types';
 import { RECENT_TRANSACTIONS, PRICE_TRENDS_DATA } from '../data/singaporePropertyData';
+import { fetchHdbResaleFromDataGov, DATASET_ID, DATASET_URL } from '../services/dataGovSgService';
+import { DataGovSgCodeModal } from './DataGovSgCodeModal';
 
 interface PriceMonitorProps {
   customer: CustomerProfile;
@@ -50,7 +56,15 @@ export const PriceMonitor: React.FC<PriceMonitorProps> = ({
     town: true,
   });
 
-  const availableTowns = ['All', 'Bishan', 'Queenstown', 'Kallang/Whampoa', 'Bukit Batok', 'Tampines', 'Punggol'];
+  // Live Data.gov.sg state
+  const [liveGovTransactions, setLiveGovTransactions] = useState<TransactionRecord[]>([]);
+  const [rawSampleRecord, setRawSampleRecord] = useState<DataGovSgRecord | null>(null);
+  const [totalGovCount, setTotalGovCount] = useState<number>(223800);
+  const [isLoadingLive, setIsLoadingLive] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string>('');
+  const [isCodeModalOpen, setIsCodeModalOpen] = useState(false);
+
+  const availableTowns = ['All', 'Bishan', 'Queenstown', 'Ang Mo Kio', 'Kallang/Whampoa', 'Bukit Batok', 'Tampines', 'Punggol', 'Bedok'];
   const availableTypes = ['All', 'HDB Resale', 'URA Private Condo', 'Executive Condo'];
 
   // Toggle pinned property
@@ -60,9 +74,53 @@ export const PriceMonitor: React.FC<PriceMonitorProps> = ({
     );
   };
 
+  // Fetch live Data.gov.sg transactions
+  const loadDataGovFeed = async (townToFetch?: string) => {
+    setIsLoadingLive(true);
+    try {
+      const townParam = townToFetch || (selectedTown === 'All' ? customer.currentProperty.town : selectedTown);
+      const res = await fetchHdbResaleFromDataGov({
+        town: townParam,
+        limit: 60,
+        sort: 'month desc',
+        customer,
+      });
+
+      if (res.success && res.records.length > 0) {
+        setLiveGovTransactions(res.records);
+        if (res.rawRecords && res.rawRecords.length > 0) {
+          setRawSampleRecord(res.rawRecords[0]);
+        }
+        if (res.total) {
+          setTotalGovCount(res.total);
+        }
+        const now = new Date();
+        setLastSyncTime(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      }
+    } catch (err) {
+      console.error('Failed to load Data.gov.sg transactions:', err);
+    } finally {
+      setIsLoadingLive(false);
+    }
+  };
+
+  // Trigger load on mount or town switch
+  useEffect(() => {
+    loadDataGovFeed(selectedTown === 'All' ? customer.currentProperty.town : selectedTown);
+  }, [selectedTown, customer.currentProperty.town]);
+
+  // Combined transactions (Live Data.gov.sg + Curated private/EC benchmark data)
+  const combinedTransactions = useMemo(() => {
+    if (liveGovTransactions.length === 0) {
+      return RECENT_TRANSACTIONS;
+    }
+    const nonHdbCurated = RECENT_TRANSACTIONS.filter((tx) => tx.propertyType !== 'HDB Resale');
+    return [...liveGovTransactions, ...nonHdbCurated];
+  }, [liveGovTransactions]);
+
   // Filter transactions
   const filteredTransactions = useMemo(() => {
-    return RECENT_TRANSACTIONS.filter((tx) => {
+    return combinedTransactions.filter((tx) => {
       const matchTown = selectedTown === 'All' || tx.town.toLowerCase() === selectedTown.toLowerCase();
       const matchType = selectedType === 'All' || tx.propertyType === selectedType;
       const matchSearch =
@@ -72,7 +130,7 @@ export const PriceMonitor: React.FC<PriceMonitorProps> = ({
       const matchComp = !onlyComps || tx.isComparableToUser;
       return matchTown && matchType && matchSearch && matchComp;
     });
-  }, [selectedTown, selectedType, searchQuery, onlyComps]);
+  }, [combinedTransactions, selectedTown, selectedType, searchQuery, onlyComps]);
 
   // Customer target metrics
   const targetPsf = Math.round(
@@ -198,6 +256,48 @@ export const PriceMonitor: React.FC<PriceMonitorProps> = ({
             className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold uppercase tracking-wider flex items-center space-x-1 mt-1"
           >
             <span>Assign Agent to Lock In Valuation &rarr;</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Official Data.gov.sg API Live Connection Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-black/40 border border-emerald-500/30 text-xs shadow-[0_0_15px_rgba(16,185,129,0.05)]">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex items-center space-x-2">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+            </span>
+            <span className="font-semibold text-white flex items-center space-x-1">
+              <span>Data.gov.sg Feed</span>
+            </span>
+          </div>
+          <span className="px-2 py-0.5 rounded font-mono text-[10px] bg-white/5 border border-white/10 text-emerald-400">
+            dataset_id: {DATASET_ID}
+          </span>
+          <span className="text-[11px] text-gray-400">
+            • {liveGovTransactions.length > 0 ? `${liveGovTransactions.length} Live Records Synced` : 'Connecting...'}
+            {lastSyncTime && ` (${lastSyncTime})`}
+          </span>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <button
+            type="button"
+            onClick={() => setIsCodeModalOpen(true)}
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 text-[11px] font-semibold uppercase tracking-wider transition"
+          >
+            <Code2 className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Inspect Python API Code</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => loadDataGovFeed()}
+            disabled={isLoadingLive}
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-black font-bold text-[11px] uppercase tracking-wider transition shadow-[0_0_12px_rgba(16,185,129,0.25)]"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoadingLive ? 'animate-spin' : ''}`} />
+            <span>{isLoadingLive ? 'Querying...' : 'Sync Live Data'}</span>
           </button>
         </div>
       </div>
@@ -509,8 +609,13 @@ export const PriceMonitor: React.FC<PriceMonitorProps> = ({
                     >
                       <td className="py-3 px-4 font-mono text-gray-500">{tx.date}</td>
                       <td className="py-3 px-4">
-                        <div className="font-semibold text-white flex items-center space-x-1.5">
+                        <div className="font-semibold text-white flex items-center space-x-1.5 flex-wrap gap-1">
                           <span>{tx.address}</span>
+                          {tx.isLiveGovData && (
+                            <span className="px-1.5 py-0.2 rounded-sm text-[8px] uppercase tracking-wider font-bold bg-emerald-950/90 text-emerald-300 border border-emerald-500/40">
+                              GOV.SG LIVE
+                            </span>
+                          )}
                           {tx.isComparableToUser && (
                             <span className="px-1.5 py-0.2 rounded-sm text-[8px] uppercase tracking-wider font-bold bg-emerald-600 text-black">
                               DIRECT COMP
@@ -586,13 +691,38 @@ export const PriceMonitor: React.FC<PriceMonitorProps> = ({
           </table>
         </div>
 
-        <div className="flex items-center justify-between text-xs text-gray-500 pt-2">
-          <span>Showing {filteredTransactions.length} URA & HDB transacted records</span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-gray-500 pt-2">
           <div className="flex items-center space-x-2">
+            <span>Showing {filteredTransactions.length} records</span>
+            {liveGovTransactions.length > 0 && (
+              <span className="text-emerald-400 font-semibold">
+                ({liveGovTransactions.length} directly from Data.gov.sg {DATASET_ID})
+              </span>
+            )}
+          </div>
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={() => setIsCodeModalOpen(true)}
+              className="text-emerald-400 hover:text-emerald-300 font-semibold uppercase tracking-wider text-[11px] flex items-center space-x-1"
+            >
+              <Code2 className="w-3 h-3" />
+              <span>Python & API Details</span>
+            </button>
             <span>Pinned for instant alerts: <strong className="text-white">{pinnedAddresses.length} properties</strong></span>
           </div>
         </div>
       </div>
+
+      {/* Python Data Code & Live API Inspector Modal */}
+      <DataGovSgCodeModal
+        isOpen={isCodeModalOpen}
+        onClose={() => setIsCodeModalOpen(false)}
+        rawSampleRecord={rawSampleRecord}
+        totalRecordsCount={totalGovCount}
+        lastSyncedTime={lastSyncTime}
+        onRefreshLiveFeed={() => loadDataGovFeed()}
+        isLoading={isLoadingLive}
+      />
     </div>
   );
 };

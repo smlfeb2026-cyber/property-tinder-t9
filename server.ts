@@ -34,6 +34,71 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
+// Official Data.gov.sg HDB Resale Prices API Integration
+const DATASET_ID = "d_8b84c4ee58e3cfc0ece0d773c8ca6abc";
+const DATA_GOV_SG_BASE_URL = "https://data.gov.sg/api/action/datastore_search?resource_id=" + DATASET_ID;
+
+// Dataset info and python integration reference
+app.get("/api/data-gov-sg/info", (_req, res) => {
+  res.json({
+    dataset_id: DATASET_ID,
+    title: "Resale flat prices based on registration date from Jan-2017 onwards",
+    url: DATA_GOV_SG_BASE_URL,
+    pythonSnippet: `import requests\n\ndataset_id = "${DATASET_ID}"\nurl = "https://data.gov.sg/api/action/datastore_search?resource_id=" + dataset_id\n\nresponse = requests.get(url)\nprint(response.json())`,
+    agency: "Housing and Development Board (HDB)",
+    coverage: "Singapore National Public Housing",
+  });
+});
+
+// Proxy and query endpoint for data.gov.sg resale flat transactions
+app.get("/api/data-gov-sg/resale-prices", async (req, res) => {
+  try {
+    const { town, limit = 50, q, sort = "month desc" } = req.query;
+
+    const url = new URL(DATA_GOV_SG_BASE_URL);
+    url.searchParams.set("limit", String(Math.min(100, Math.max(1, Number(limit) || 50))));
+    if (sort) {
+      url.searchParams.set("sort", String(sort));
+    }
+    if (q) {
+      url.searchParams.set("q", String(q));
+    }
+    if (town && town !== "All") {
+      url.searchParams.set("filters", JSON.stringify({ town: String(town).toUpperCase() }));
+    }
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "ElectricPropertyAgent-SG/1.0",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Data.gov.sg API returned HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const rawData = await response.json();
+
+    res.json({
+      success: true,
+      dataset_id: DATASET_ID,
+      queriedUrl: url.toString(),
+      pythonCodeSnippet: `import requests\n\ndataset_id = "${DATASET_ID}"\nurl = "https://data.gov.sg/api/action/datastore_search?resource_id=" + dataset_id\n\nresponse = requests.get(url)\nprint(response.json())`,
+      result: rawData.result || null,
+      records: rawData.result?.records || [],
+      total: rawData.result?.total || rawData.result?.records?.length || 0,
+    });
+  } catch (error: any) {
+    console.error("Error querying Data.gov.sg API:", error);
+    res.status(500).json({
+      success: false,
+      dataset_id: DATASET_ID,
+      error: error.message || "Failed to query Data.gov.sg API",
+    });
+  }
+});
+
 // AI Electric Property Agent Valuation & Advisory endpoint
 app.post("/api/agent-evaluate", async (req, res) => {
   try {
